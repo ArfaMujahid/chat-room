@@ -78,12 +78,11 @@ func (c *Client) writePump(ctx context.Context) {
 	_ = ctx
 }
 
-// Run starts the client's read and write pumps and blocks until both have exited,
-// guaranteeing no goroutine outlives the connection (NFR-R1). main/web calls this
-// once per accepted connection.
+// Run starts the client's read and write pumps and blocks until the read pump
+// returns (the connection ended), guaranteeing no goroutine outlives the connection
+// (NFR-R1). main/web calls this once per accepted connection. The send channel is
+// closed by the hub on unregister, which is what ends writePump.
 func (c *Client) Run(ctx context.Context, h *Hub) {
-	// TODO(arfa): start writePump in a goroutine, run readPump inline (or use an
-	// errgroup), then close(c.send) ownership stays with the hub on unregister.
-	_ = ctx
-	_ = h
+	go c.writePump(ctx)
+	c.readPump(ctx, h)
 }

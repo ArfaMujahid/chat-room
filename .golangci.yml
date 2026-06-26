@@ -1,0 +1,50 @@
+# golangci-lint configuration (schema v2). Enforces the linters named in
+# CODING-STANDARDS.md §1 plus a few high-value extras that back the error-handling
+# (§3) and resource-management (§6) rules. Run locally with `golangci-lint run`.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # "standard" = errcheck, govet, ineffassign, staticcheck, unused — the set the
+  # standards call out. The rest extend it toward the project's specific rules.
+  default: standard
+  enable:
+    - bodyclose # §6: HTTP/response bodies must be closed.
+    - errorlint # §3: use errors.Is/As and %w, not == / %v.
+    - misspell # catch typos in comments/strings.
+    - revive # §0/§2/§11: naming + exported-symbol doc comments.
+    - unconvert # remove redundant type conversions.
+    - copyloopvar # guard against loop-variable capture mistakes.
+  settings:
+    revive:
+      rules:
+        - name: exported # exported identifiers are documented, comments start with the name.
+        - name: package-comments # every package has a package comment (§0).
+        - name: var-naming # acronyms keep case: URL/HTTP/ID (§2).
+        - name: context-as-argument # ctx is the first parameter (§4).
+        - name: error-strings # lowercase, no trailing punctuation (§3).
+        - name: error-return # error is the last return value (§3).
+    staticcheck:
+      checks:
+        - all
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Test files may omit some doc comments and reuse helper patterns.
+      - path: _test\.go
+        linters:
+          - revive
+
+formatters:
+  enable:
+    - gofmt # §1: the one true format.
+    - goimports # §1: import grouping/ordering, with local imports grouped last.
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/ArfaMujahid/chat-room

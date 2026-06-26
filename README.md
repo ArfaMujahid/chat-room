@@ -1,5 +1,7 @@
 # Real-Time Chat Server
 
+[![CI](https://github.com/ArfaMujahid/chat-room/actions/workflows/ci.yml/badge.svg)](https://github.com/ArfaMujahid/chat-room/actions/workflows/ci.yml)
+
 A real-time, multi-room chat server in Go. Users connect over a **WebSocket**, pick a
 display name, join **named public rooms**, and exchange messages that appear instantly
 for everyone in the room. Message history is **persisted to Postgres** so it survives

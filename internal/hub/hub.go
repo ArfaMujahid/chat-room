@@ -106,14 +106,59 @@ func (h *Hub) Submit(cmd command) {
 func (h *Hub) handle(ctx context.Context, cmd command) {
 	switch cmd.kind {
 	case message.TypeJoin:
-		// TODO(arfa): create-or-get the room, add the client, send history from the
-		// store to this client only, then broadcast a presence join (FR-3/7/9).
+		h.join(cmd)
 	case message.TypeLeave:
-		// TODO(arfa): remove from room, broadcast presence leave (FR-4/9).
+		h.leave(cmd)
 	case message.TypeMessage:
 		h.broadcast(ctx, cmd)
 	default:
 		h.log.Warn("hub: unknown command", "kind", cmd.kind)
+	}
+}
+
+// join adds the client to a room (created on first join, FR-3), then notifies the
+// room of the new presence (FR-9). Sending recent history to the joining client is
+// still stubbed.
+func (h *Hub) join(cmd command) {
+	r, ok := h.rooms[cmd.room]
+	if !ok {
+		r = newRoom(cmd.room)
+		h.rooms[cmd.room] = r
+	}
+	r.add(cmd.client)
+	// TODO(arfa): h.store.RecentByRoom(ctx, cmd.room, h.historyLimit) → send a
+	// TypeHistory frame to cmd.client only, before announcing presence (FR-7).
+	h.broadcastPresence(r, cmd.client.Name, true)
+}
+
+// leave removes the client from a room, announces the departure (FR-4/9), and
+// reclaims the room once it is empty.
+func (h *Hub) leave(cmd command) {
+	r, ok := h.rooms[cmd.room]
+	if !ok {
+		return
+	}
+	r.remove(cmd.client)
+	h.broadcastPresence(r, cmd.client.Name, false)
+	if r.empty() {
+		delete(h.rooms, r.name)
+	}
+}
+
+// broadcastPresence notifies every member of r that user joined or left, attaching
+// the current member list (FR-9). It uses the same non-blocking send as messages so
+// a slow client cannot stall the announcement (NFR-R2).
+func (h *Hub) broadcastPresence(r *room, user string, joined bool) {
+	frame := message.Envelope{
+		Type:     message.TypePresence,
+		Room:     r.name,
+		Presence: &message.Presence{User: user, Joined: joined, Members: r.names()},
+	}
+	for c := range r.members {
+		if !c.enqueue(frame) {
+			h.log.Warn("hub: dropping slow client", "user", c.Name, "room", r.name)
+			r.remove(c)
+		}
 	}
 }
 
@@ -153,15 +198,15 @@ func (h *Hub) broadcast(ctx context.Context, cmd command) {
 	}
 }
 
-// removeFromAllRooms drops c from every room it belongs to and reclaims now-empty
-// rooms, then would broadcast the leave. Runs on the actor goroutine (no locking).
+// removeFromAllRooms drops c from every room it belongs to, announces each leave
+// (FR-9), and reclaims now-empty rooms. Runs on the actor goroutine (no locking).
 func (h *Hub) removeFromAllRooms(c *Client) {
 	for name, r := range h.rooms {
 		if _, ok := r.members[c]; !ok {
 			continue
 		}
 		r.remove(c)
-		// TODO(arfa): broadcast presence leave to the room (FR-9).
+		h.broadcastPresence(r, c.Name, false)
 		if r.empty() {
 			delete(h.rooms, name)
 		}
