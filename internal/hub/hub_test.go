@@ -202,6 +202,20 @@ func TestBroadcastReachesOtherMembers(t *testing.T) {
 	}
 }
 
+// TestMessagesTotalIncrements checks broadcasting a message bumps the metric counter
+// surfaced in Stats (NFR-O1).
+func TestMessagesTotalIncrements(t *testing.T) {
+	h, ctx := startHub(t, nil)
+	_, alice := startClient(t, ctx, h, "alice", 16, 16)
+	_, bob := startClient(t, ctx, h, "bob", 16, 16)
+	joinAndWait(t, ctx, h, alice, "r", 1)
+	joinAndWait(t, ctx, h, bob, "r", 2)
+
+	alice.in <- message.Envelope{Type: message.TypeMessage, Room: "r", Text: "x"}
+
+	waitFor(t, ctx, h, func(s Stats) bool { return s.MessagesTotal >= 1 }, "messages_total to increment")
+}
+
 // TestHistoryOnJoin checks a joining client receives the room's recent history (FR-7).
 func TestHistoryOnJoin(t *testing.T) {
 	st := newFakeStore()

@@ -76,7 +76,16 @@ go run ./cmd/chat \
 ```
 
 Run `go run ./cmd/chat --help` for all flags (message-size cap, send-buffer depth,
-ping interval, history limit, room cap).
+ping interval, history limit, room cap, session TTL).
+
+## Observability
+
+- **Live metrics** — `GET /api/rooms` (authenticated) returns the connection count,
+  active rooms with member counts, and the current message rate; the UI shows the
+  online count and messages/sec in the header.
+- **Profiling** — pass `--debug-addr 127.0.0.1:6060` to expose `pprof` on a separate
+  local port (off by default, and never on the public chat port): e.g.
+  `go tool pprof http://127.0.0.1:6060/debug/pprof/goroutine` to inspect goroutines.
 
 ## Develop
 

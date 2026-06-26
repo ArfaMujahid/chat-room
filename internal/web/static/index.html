@@ -4,16 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Go Chat</title>
-  <!-- Inline SVG favicon (a chat bubble) so the page needs no extra request and logs no 404. -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%233b82f6'/><circle cx='5.5' cy='9' r='1' fill='white'/><circle cx='8' cy='9' r='1' fill='white'/><circle cx='10.5' cy='9' r='1' fill='white'/></svg>" />
+  <!-- Inline SVG favicon so the page needs no extra request and logs no 404. -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='4' fill='%237c6cff'/><path d='M3.5 4.5h9v5h-5l-2.5 2v-2h-1.5z' fill='white'/></svg>" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <!-- Login / register screen, shown until the user is authenticated. -->
   <div id="auth">
     <div class="auth-card">
-      <h1>Go Chat</h1>
-      <div class="auth-tabs">
+      <div class="brand brand-lg">
+        <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3v-3H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>
+        <span class="wordmark">Go Chat</span>
+      </div>
+      <p class="auth-subtitle">Real-time rooms — sign in to start chatting.</p>
+      <div class="segment" role="tablist">
         <button type="button" id="tab-login" class="active">Log in</button>
         <button type="button" id="tab-register">Register</button>
       </div>
@@ -21,7 +25,7 @@
         <input id="auth-username" type="text" placeholder="Username" autocomplete="username" />
         <input id="auth-display" type="text" placeholder="Display name" autocomplete="nickname" hidden />
         <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password" />
-        <button type="submit" id="auth-submit">Log in</button>
+        <button type="submit" id="auth-submit" class="btn-primary">Log in</button>
         <p id="auth-error" class="auth-error" role="alert"></p>
       </form>
     </div>
@@ -30,20 +34,27 @@
   <!-- Chat application, shown once authenticated. -->
   <div id="app" hidden>
     <aside id="sidebar">
-      <h1>Go Chat</h1>
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3v-3H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>
+        <span class="wordmark">Go Chat</span>
+      </div>
+
       <div id="account">
+        <span id="account-avatar" class="avatar"></span>
         <span id="account-name"></span>
         <button type="button" id="logout">Log out</button>
       </div>
-      <div id="rooms-panel">
+
+      <div class="panel">
         <h2>Rooms</h2>
         <ul id="rooms"></ul>
         <form id="join-form">
-          <input id="room-input" type="text" placeholder="Join or create a room" autocomplete="off" />
-          <button type="submit">Join</button>
+          <input id="room-input" type="text" placeholder="New room…" autocomplete="off" />
+          <button type="submit" aria-label="Join or create room">+</button>
         </form>
       </div>
-      <div id="presence-panel">
+
+      <div class="panel">
         <h2>Present</h2>
         <ul id="presence"></ul>
       </div>
@@ -51,16 +62,27 @@
 
     <main id="chat">
       <header id="chat-header">
-        <span id="current-room">No room</span>
+        <span id="current-room" class="room-title">No room</span>
         <div class="header-right">
-          <span id="online" title="connected clients">0 online</span>
-          <span id="status" class="disconnected">disconnected</span>
+          <span class="stat" id="online" title="connected clients">0 online</span>
+          <span class="stat" id="rate" title="messages per second">0/s</span>
+          <span id="status" class="status disconnected">
+            <span class="dot"></span><span id="status-text">offline</span>
+          </span>
         </div>
       </header>
+
       <ul id="messages"></ul>
+
+      <div id="empty-state">
+        <svg class="empty-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8l-4 3v-3H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>
+        <h3>No room selected</h3>
+        <p>Pick a room on the left, or create one, to start chatting.</p>
+      </div>
+
       <form id="message-form">
-        <input id="message-input" type="text" placeholder="Type a message…" autocomplete="off" disabled />
-        <button type="submit" disabled>Send</button>
+        <input id="message-input" type="text" placeholder="Message…" autocomplete="off" disabled />
+        <button type="submit" class="btn-primary" disabled>Send</button>
       </form>
     </main>
   </div>

@@ -45,6 +45,9 @@ type Config struct {
 	// SecureCookies marks the session cookie Secure (HTTPS-only). Leave false for
 	// local HTTP development; set true behind TLS in production.
 	SecureCookies bool
+	// DebugAddr is the address for the pprof debug server (NFR-O2). Empty disables
+	// it; set a localhost address like "127.0.0.1:6060" to enable profiling.
+	DebugAddr string
 }
 
 // Default returns a Config populated with sensible defaults. Callers override fields

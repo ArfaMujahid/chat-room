@@ -30,6 +30,7 @@
     authError: document.getElementById("auth-error"),
     // Chat app.
     app: document.getElementById("app"),
+    accountAvatar: document.getElementById("account-avatar"),
     accountName: document.getElementById("account-name"),
     logout: document.getElementById("logout"),
     rooms: document.getElementById("rooms"),
@@ -38,8 +39,11 @@
     presence: document.getElementById("presence"),
     currentRoom: document.getElementById("current-room"),
     status: document.getElementById("status"),
+    statusText: document.getElementById("status-text"),
     online: document.getElementById("online"),
+    rate: document.getElementById("rate"),
     messages: document.getElementById("messages"),
+    emptyState: document.getElementById("empty-state"),
     messageForm: document.getElementById("message-form"),
     messageInput: document.getElementById("message-input"),
     sendBtn: document.querySelector("#message-form button"),
@@ -58,6 +62,30 @@
   // connected reports whether the socket is open and usable.
   function connected() {
     return state.ws && state.ws.readyState === WebSocket.OPEN;
+  }
+
+  // --- avatars ----------------------------------------------------------------
+
+  // initials returns the first character of a name, uppercased, for an avatar.
+  function initials(name) {
+    return (name || "?").trim().charAt(0).toUpperCase() || "?";
+  }
+
+  // avatarColor derives a stable HSL colour from a name, so each user has a
+  // consistent avatar tint across the UI.
+  function avatarColor(name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return `hsl(${h % 360} 52% 52%)`;
+  }
+
+  // avatarEl builds a coloured initial avatar element.
+  function avatarEl(name, small) {
+    const a = document.createElement("span");
+    a.className = small ? "avatar sm" : "avatar";
+    a.style.background = avatarColor(name);
+    a.textContent = initials(name);
+    return a;
   }
 
   // --- authentication ---------------------------------------------------------
@@ -138,11 +166,15 @@
     els.authUsername.focus();
   }
 
-  // enterApp reveals the chat, opens the WebSocket, and starts polling rooms.
+  // enterApp reveals the chat, sets the account avatar, opens the WebSocket, and
+  // starts polling rooms.
   function enterApp() {
     els.auth.hidden = true;
     els.app.hidden = false;
     els.accountName.textContent = state.user.display_name;
+    els.accountAvatar.style.background = avatarColor(state.user.display_name);
+    els.accountAvatar.textContent = initials(state.user.display_name);
+    updateRoomView();
     connect();
     refreshRooms();
     state.roomsTimer = setInterval(refreshRooms, roomsPoll);
@@ -168,6 +200,15 @@
     els.currentRoom.textContent = "No room";
   }
 
+  // updateRoomView shows the message list + composer when in a room, or the empty
+  // state otherwise.
+  function updateRoomView() {
+    const inRoom = Boolean(state.room);
+    els.messages.hidden = !inRoom;
+    els.emptyState.hidden = inRoom;
+    els.messageForm.hidden = !inRoom;
+  }
+
   // --- websocket --------------------------------------------------------------
 
   // wsURL builds the ws(s):// URL for /ws. Identity comes from the session cookie, so
@@ -177,11 +218,11 @@
     return `${proto}//${location.host}/ws`;
   }
 
-  // setStatus reflects the connection state and enables the composer only when we can
-  // actually send (connected and in a room).
+  // setStatus reflects the connection state in the header and enables the composer
+  // only when we can actually send (connected and in a room).
   function setStatus(isConnected) {
-    els.status.textContent = isConnected ? "connected" : "disconnected";
-    els.status.className = isConnected ? "connected" : "disconnected";
+    els.status.className = "status " + (isConnected ? "connected" : "disconnected");
+    els.statusText.textContent = isConnected ? "online" : "offline";
     const canSend = isConnected && Boolean(state.room);
     els.messageInput.disabled = !canSend;
     els.sendBtn.disabled = !canSend;
@@ -248,27 +289,47 @@
     }
   }
 
+  // formatTime renders a short HH:MM timestamp.
+  function formatTime(iso) {
+    return iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  }
+
   // renderMessage appends one chat bubble; mine aligns the local user's own messages
-  // to the right.
+  // to the right (and omits the avatar/sender, since it's you).
   function renderMessage(m, mine) {
     const li = document.createElement("li");
-    li.className = mine ? "mine" : "other";
+    li.className = "msg " + (mine ? "mine" : "other");
 
-    const meta = document.createElement("span");
-    meta.className = "meta";
-    const when = m.created_at ? new Date(m.created_at).toLocaleTimeString() : "";
-    meta.textContent = mine ? `you · ${when}` : `${m.sender_name} · ${when}`;
+    if (!mine) li.appendChild(avatarEl(m.sender_name, false));
 
-    const body = document.createElement("span");
-    body.className = "body";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+
+    const meta = document.createElement("div");
+    meta.className = "bubble-meta";
+    if (!mine) {
+      const sender = document.createElement("span");
+      sender.className = "sender";
+      sender.textContent = m.sender_name;
+      sender.style.color = avatarColor(m.sender_name);
+      meta.appendChild(sender);
+    }
+    const time = document.createElement("span");
+    time.className = "time";
+    time.textContent = formatTime(m.created_at);
+    meta.appendChild(time);
+
+    const body = document.createElement("div");
+    body.className = "bubble-body";
     body.textContent = m.content;
 
-    li.append(meta, body);
+    bubble.append(meta, body);
+    li.appendChild(bubble);
     els.messages.appendChild(li);
     els.messages.scrollTop = els.messages.scrollHeight;
   }
 
-  // renderSystem appends a centered, italic system line (joins, leaves, errors).
+  // renderSystem appends a centered system pill (joins, leaves, errors).
   function renderSystem(text) {
     const li = document.createElement("li");
     li.className = "system";
@@ -284,7 +345,7 @@
     els.presence.replaceChildren();
     (p.members || []).forEach((name) => {
       const li = document.createElement("li");
-      li.textContent = name;
+      li.append(avatarEl(name, true), document.createTextNode(name));
       els.presence.appendChild(li);
     });
   }
@@ -315,8 +376,8 @@
       });
   }
 
-  // refreshRooms polls the REST endpoint for active rooms and the connection count
-  // (FR-10, NFR-O1). Errors are ignored; the next tick retries.
+  // refreshRooms polls the REST endpoint for active rooms, the connection count, and
+  // the message rate (FR-10, NFR-O1). Errors are ignored; the next tick retries.
   async function refreshRooms() {
     try {
       const res = await fetch("/api/rooms");
@@ -324,6 +385,7 @@
       const stats = await res.json();
       renderRooms(stats.rooms || []);
       els.online.textContent = `${stats.connections || 0} online`;
+      els.rate.textContent = `${stats.message_rate || 0}/s`;
     } catch {
       // transient
     }
@@ -338,6 +400,7 @@
     els.currentRoom.textContent = room;
     els.messages.replaceChildren();
     els.presence.replaceChildren();
+    updateRoomView();
     send({ type: Type.Join, room });
     renderRooms(state.rooms);
     setStatus(connected());

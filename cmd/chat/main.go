@@ -6,8 +6,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log/slog"
+	"net/http"
+	_ "net/http/pprof" // registers pprof handlers on http.DefaultServeMux
 	"os"
 	"os/signal"
 	"syscall"
@@ -97,7 +100,33 @@ func run() error {
 		return srv.Shutdown(shutdownCtx)
 	})
 
+	// Optional pprof server for profiling goroutines/CPU under load (NFR-O2).
+	if cfg.DebugAddr != "" {
+		startDebugServer(gctx, g, cfg.DebugAddr, logger)
+	}
+
 	return g.Wait()
+}
+
+// startDebugServer runs a pprof HTTP server on addr until ctx is cancelled. The pprof
+// handlers are registered on http.DefaultServeMux by the net/http/pprof import; the
+// chat server uses its own mux, so profiling never leaks onto the public port. Bind
+// it to localhost in practice — it is unauthenticated.
+func startDebugServer(ctx context.Context, g *errgroup.Group, addr string, logger *slog.Logger) {
+	dbg := &http.Server{Addr: addr, Handler: http.DefaultServeMux, ReadHeaderTimeout: 10 * time.Second}
+	g.Go(func() error {
+		logger.Info("chat: pprof debug server listening", "addr", addr)
+		if err := dbg.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	})
+	g.Go(func() error {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		defer cancel()
+		return dbg.Shutdown(shutdownCtx)
+	})
 }
 
 // parseFlags builds a Config from defaults overridden by command-line flags. Every
@@ -113,6 +142,7 @@ func parseFlags() config.Config {
 	flag.IntVar(&cfg.MaxRooms, "max-rooms", cfg.MaxRooms, "maximum concurrently active rooms")
 	flag.DurationVar(&cfg.SessionTTL, "session-ttl", cfg.SessionTTL, "how long a login session lasts")
 	flag.BoolVar(&cfg.SecureCookies, "secure-cookies", cfg.SecureCookies, "mark the session cookie Secure (HTTPS only)")
+	flag.StringVar(&cfg.DebugAddr, "debug-addr", cfg.DebugAddr, "address for the pprof debug server, e.g. 127.0.0.1:6060 (empty disables it)")
 	flag.Parse()
 	return cfg
 }

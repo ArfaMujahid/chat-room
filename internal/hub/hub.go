@@ -43,6 +43,10 @@ type Stats struct {
 	Connections int `json:"connections"`
 	// Rooms lists active rooms with their member counts.
 	Rooms []RoomInfo `json:"rooms"`
+	// MessagesTotal is the number of messages broadcast since startup.
+	MessagesTotal int64 `json:"messages_total"`
+	// MessageRate is messages broadcast in the last sampled second (NFR-O1).
+	MessageRate int64 `json:"message_rate"`
 }
 
 // Hub is the coordinator. Everything that mutates rooms/clients flows through its
@@ -73,6 +77,13 @@ type Hub struct {
 	historyLimit int
 	// log is the structured logger (NFR-U3).
 	log *slog.Logger
+
+	// messagesTotal counts broadcast messages; messageRate is the count in the last
+	// sampled second; lastSampledTotal is the previous sample. All three are owned by
+	// the Run goroutine, so they need no synchronization (NFR-C2).
+	messagesTotal    int64
+	messageRate      int64
+	lastSampledTotal int64
 }
 
 // New constructs a Hub. The persist channel and store are injected so the hub codes
@@ -102,6 +113,9 @@ func New(st store.MessageStore, persist chan<- message.Message, historyLimit int
 // releases any client goroutine still trying to register/submit/unregister.
 func (h *Hub) Run(ctx context.Context) {
 	defer close(h.done)
+	// Sample the message rate once per second on the actor goroutine.
+	sampler := time.NewTicker(time.Second)
+	defer sampler.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -114,6 +128,9 @@ func (h *Hub) Run(ctx context.Context) {
 			h.handle(ctx, cmd)
 		case reply := <-h.query:
 			reply <- h.snapshot()
+		case <-sampler.C:
+			h.messageRate = h.messagesTotal - h.lastSampledTotal
+			h.lastSampledTotal = h.messagesTotal
 		}
 	}
 }
@@ -230,6 +247,7 @@ func (h *Hub) broadcast(ctx context.Context, cmd command) {
 	if !ok {
 		return
 	}
+	h.messagesTotal++
 	m := message.Message{
 		Room:       cmd.room,
 		SenderID:   cmd.client.ID,
@@ -314,5 +332,10 @@ func (h *Hub) snapshot() Stats {
 	for name, r := range h.rooms {
 		rooms = append(rooms, RoomInfo{Name: name, Members: len(r.members)})
 	}
-	return Stats{Connections: len(h.clients), Rooms: rooms}
+	return Stats{
+		Connections:   len(h.clients),
+		Rooms:         rooms,
+		MessagesTotal: h.messagesTotal,
+		MessageRate:   h.messageRate,
+	}
 }
