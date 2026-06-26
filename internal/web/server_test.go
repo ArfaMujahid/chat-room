@@ -16,12 +16,18 @@ import (
 	"github.com/ArfaMujahid/chat-room/internal/hub"
 	"github.com/ArfaMujahid/chat-room/internal/message"
 	"github.com/ArfaMujahid/chat-room/internal/session"
+	"github.com/ArfaMujahid/chat-room/internal/store"
 )
 
-// newTestServer builds a Server with a running hub and a nil store (no history) for
+// newTestServer builds a Server with a running hub and no store (no history).
+func newTestServer(t *testing.T) *Server {
+	return newTestServerWithStore(t, nil)
+}
+
+// newTestServerWithStore builds a Server with a running hub backed by st, for
 // handler and WebSocket tests. The hub and context are torn down on cleanup
 // (CODING-STANDARDS §8).
-func newTestServer(t *testing.T) *Server {
+func newTestServerWithStore(t *testing.T, st store.MessageStore) *Server {
 	t.Helper()
 	cfg := config.Default()
 	cfg.DBURL = "postgres://test"
@@ -29,7 +35,7 @@ func newTestServer(t *testing.T) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	h := hub.New(nil, make(chan message.Message, 16), cfg.HistoryLimit, slog.Default())
+	h := hub.New(st, make(chan message.Message, 16), cfg.HistoryLimit, slog.Default())
 	go h.Run(ctx)
 
 	srv, err := New(ctx, cfg, h, session.New(), slog.Default())
@@ -37,6 +43,22 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("New: got error %v; want nil", err)
 	}
 	return srv
+}
+
+// fakeHistoryStore is a MessageStore that serves canned history, so the history-on-
+// join path can be tested through the full WebSocket stack without a database.
+type fakeHistoryStore struct {
+	history []message.Message
+}
+
+// SaveMessage accepts and echoes the message; persistence is not under test here.
+func (s *fakeHistoryStore) SaveMessage(_ context.Context, m message.Message) (message.Message, error) {
+	return m, nil
+}
+
+// RecentByRoom returns the canned history regardless of room/limit.
+func (s *fakeHistoryStore) RecentByRoom(_ context.Context, _ string, _ int) ([]message.Message, error) {
+	return s.history, nil
 }
 
 // TestRoomsEndpoint checks GET /api/rooms returns a 200 with a well-formed snapshot
@@ -92,6 +114,37 @@ func TestWebSocketBroadcast(t *testing.T) {
 	}
 	if got.Message.SenderName != "alice" {
 		t.Fatalf("sender: got %q; want %q", got.Message.SenderName, "alice")
+	}
+}
+
+// TestWebSocketHistoryOnJoin verifies a joining client receives the room's recent
+// history through the full WebSocket stack (web → hub → store), proving FR-7 without
+// a live database by injecting a fake store.
+func TestWebSocketHistoryOnJoin(t *testing.T) {
+	st := &fakeHistoryStore{history: []message.Message{
+		{Room: "r", SenderName: "old", Content: "first"},
+		{Room: "r", SenderName: "old", Content: "second"},
+	}}
+	srv := newTestServerWithStore(t, st)
+	ts := httptest.NewServer(srv.http.Handler)
+	defer ts.Close()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	c := dial(t, ctx, wsURL+"?name=alice")
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	writeEnv(t, ctx, c, message.Envelope{Type: message.TypeJoin, Room: "r"})
+
+	got := readUntil(t, ctx, c, message.TypeHistory)
+	if len(got.History) != 2 {
+		t.Fatalf("history length: got %d; want 2", len(got.History))
+	}
+	if got.History[0].Content != "first" || got.History[1].Content != "second" {
+		t.Fatalf("history order: got [%q, %q]; want [first, second]",
+			got.History[0].Content, got.History[1].Content)
 	}
 }
 
