@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ArfaMujahid/chat-room/internal/message"
-	"github.com/ArfaMujahid/chat-room/internal/session"
 	"github.com/ArfaMujahid/chat-room/internal/store"
 )
 
@@ -125,7 +124,7 @@ func startHub(t *testing.T, st store.MessageStore) (*Hub, context.Context) {
 func startClient(t *testing.T, ctx context.Context, h *Hub, name string, sendBuf, outBuf int) (*Client, *fakeConn) {
 	t.Helper()
 	fc := newFakeConn(outBuf)
-	c := NewClient(session.UserID(name), name, fc, sendBuf, time.Hour)
+	c := NewClient(name, name, fc, sendBuf, time.Hour)
 	h.Register(c)
 	go c.Run(ctx, h)
 	return c, fc

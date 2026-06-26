@@ -9,12 +9,31 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="app">
+  <!-- Login / register screen, shown until the user is authenticated. -->
+  <div id="auth">
+    <div class="auth-card">
+      <h1>Go Chat</h1>
+      <div class="auth-tabs">
+        <button type="button" id="tab-login" class="active">Log in</button>
+        <button type="button" id="tab-register">Register</button>
+      </div>
+      <form id="auth-form" autocomplete="on">
+        <input id="auth-username" type="text" placeholder="Username" autocomplete="username" />
+        <input id="auth-display" type="text" placeholder="Display name" autocomplete="nickname" hidden />
+        <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password" />
+        <button type="submit" id="auth-submit">Log in</button>
+        <p id="auth-error" class="auth-error" role="alert"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Chat application, shown once authenticated. -->
+  <div id="app" hidden>
     <aside id="sidebar">
       <h1>Go Chat</h1>
-      <div id="identity">
-        <label for="name">Display name</label>
-        <input id="name" type="text" placeholder="Pick a name" autocomplete="off" />
+      <div id="account">
+        <span id="account-name"></span>
+        <button type="button" id="logout">Log out</button>
       </div>
       <div id="rooms-panel">
         <h2>Rooms</h2>

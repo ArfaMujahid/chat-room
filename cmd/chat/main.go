@@ -15,10 +15,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ArfaMujahid/chat-room/internal/auth"
 	"github.com/ArfaMujahid/chat-room/internal/config"
 	"github.com/ArfaMujahid/chat-room/internal/hub"
 	"github.com/ArfaMujahid/chat-room/internal/persist"
-	"github.com/ArfaMujahid/chat-room/internal/session"
 	"github.com/ArfaMujahid/chat-room/internal/store"
 	"github.com/ArfaMujahid/chat-room/internal/web"
 )
@@ -69,13 +69,14 @@ func run() error {
 
 	persister := persist.New(st, persistQueueDepth, logger)
 	h := hub.New(st, persister.Inbox(), cfg.HistoryLimit, logger)
-	sessions := session.New()
+	// Auth shares the store's connection pool and the schema it migrated.
+	authSvc := auth.NewService(auth.NewPostgres(st.Pool()), cfg.SessionTTL)
 
 	// errgroup ties the components together: if any returns (signal, serve error),
 	// gctx is cancelled and the rest wind down (CODING-STANDARDS §4).
 	g, gctx := errgroup.WithContext(ctx)
 
-	srv, err := web.New(gctx, cfg, h, sessions, logger)
+	srv, err := web.New(gctx, cfg, h, authSvc, logger)
 	if err != nil {
 		return err
 	}
@@ -110,6 +111,8 @@ func parseFlags() config.Config {
 	flag.DurationVar(&cfg.PingInterval, "ping-interval", cfg.PingInterval, "interval between heartbeat pings")
 	flag.IntVar(&cfg.HistoryLimit, "history-limit", cfg.HistoryLimit, "recent messages sent to a client on join")
 	flag.IntVar(&cfg.MaxRooms, "max-rooms", cfg.MaxRooms, "maximum concurrently active rooms")
+	flag.DurationVar(&cfg.SessionTTL, "session-ttl", cfg.SessionTTL, "how long a login session lasts")
+	flag.BoolVar(&cfg.SecureCookies, "secure-cookies", cfg.SecureCookies, "mark the session cookie Secure (HTTPS only)")
 	flag.Parse()
 	return cfg
 }

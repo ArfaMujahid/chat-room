@@ -1,45 +1,41 @@
-// Package web is the HTTP edge of the chat server. It serves the embedded UI, lists
-// rooms over a small REST API, and upgrades GET /ws to a WebSocket whose lifecycle
-// is handed to the hub. The HTTP server is configured with explicit timeouts and the
+// Package web is the HTTP edge of the chat server. It serves the embedded UI, the
+// authentication endpoints, a small rooms API, and upgrades GET /ws to a WebSocket
+// whose lifecycle is handed to the hub. The HTTP server has explicit timeouts and the
 // UI is embedded so the whole thing ships as a single binary (CODING-STANDARDS §6,
-// NFR-D1).
+// NFR-D1). /ws and the rooms API require a valid login session.
 package web
 
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"github.com/ArfaMujahid/chat-room/internal/auth"
 	"github.com/ArfaMujahid/chat-room/internal/config"
 	"github.com/ArfaMujahid/chat-room/internal/hub"
-	"github.com/ArfaMujahid/chat-room/internal/session"
 )
-
-// maxDisplayName caps a chosen display name so a client cannot send an unbounded one.
-const maxDisplayName = 32
 
 // staticFS embeds the chat UI (HTML/CSS/JS) into the binary (go:embed, NFR-D1).
 //
 //go:embed static
 var staticFS embed.FS
 
-// Server wires the HTTP handlers to the hub and session manager and owns the
-// underlying *http.Server so it can be shut down gracefully (FR-12).
+// Server wires the HTTP handlers to the hub and auth service and owns the underlying
+// *http.Server so it can be shut down gracefully (FR-12).
 type Server struct {
-	cfg      config.Config
-	hub      *hub.Hub
-	sessions *session.Manager
-	log      *slog.Logger
-	http     *http.Server
+	cfg  config.Config
+	hub  *hub.Hub
+	auth *auth.Service
+	log  *slog.Logger
+	http *http.Server
 	// baseCtx is the application context; WebSocket connections derive from it, so
 	// cancelling it on shutdown tears every live connection down (FR-12).
 	baseCtx context.Context
@@ -48,11 +44,11 @@ type Server struct {
 // New builds a Server with all routes registered and timeouts set. It does not start
 // listening; call Serve for that. The hub must already be running, and baseCtx must
 // be the context that is cancelled on shutdown.
-func New(baseCtx context.Context, cfg config.Config, h *hub.Hub, sessions *session.Manager, log *slog.Logger) (*Server, error) {
+func New(baseCtx context.Context, cfg config.Config, h *hub.Hub, authSvc *auth.Service, log *slog.Logger) (*Server, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Server{cfg: cfg, hub: h, sessions: sessions, log: log, baseCtx: baseCtx}
+	s := &Server{cfg: cfg, hub: h, auth: authSvc, log: log, baseCtx: baseCtx}
 
 	ui, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -61,6 +57,10 @@ func New(baseCtx context.Context, cfg config.Config, h *hub.Hub, sessions *sessi
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(ui))
+	mux.HandleFunc("POST /api/register", s.handleRegister)
+	mux.HandleFunc("POST /api/login", s.handleLogin)
+	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/me", s.handleMe)
 	mux.HandleFunc("GET /api/rooms", s.handleRooms)
 	mux.HandleFunc("GET /ws", s.handleWS)
 
@@ -69,7 +69,7 @@ func New(baseCtx context.Context, cfg config.Config, h *hub.Hub, sessions *sessi
 	// and per-write deadlines are enforced inside the hub's write pump instead.
 	s.http = &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           s.sessions.Middleware(mux),
+		Handler:           s.authMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
@@ -93,22 +93,23 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 // handleRooms returns a snapshot of active rooms and the connection count as JSON for
-// the UI's room list and live metrics (FR-10, NFR-O1).
+// the UI's room list and live metrics (FR-10, NFR-O1). It requires authentication.
 func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
-	stats := s.hub.Snapshot(r.Context())
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(stats); err != nil {
-		s.log.Error("web: encoding rooms response", "err", err)
+	if _, ok := userFromContext(r.Context()); !ok {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
 	}
+	s.writeJSON(w, http.StatusOK, s.hub.Snapshot(r.Context()))
 }
 
-// handleWS validates the Origin (NFR-S4), resolves the session, upgrades the
+// handleWS authenticates the request, validates the Origin (NFR-S4), upgrades the
 // connection to a WebSocket with a bounded read size (NFR-S2), wraps it as a
-// hub.Conn, and runs it as a Client until the connection ends (FR-1).
+// hub.Conn, and runs it as a Client until the connection ends (FR-1). The client's
+// identity and display name come from the logged-in account (FR-2).
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	uid, ok := session.FromContext(r.Context())
+	user, ok := userFromContext(r.Context())
 	if !ok {
-		http.Error(w, "no session", http.StatusUnauthorized)
+		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
 
@@ -124,35 +125,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(s.cfg.MaxMessageSize) // reject oversized frames (NFR-S2)
 
-	name := displayName(r, uid)
-
 	// Derive from baseCtx so server shutdown cancels the connection (FR-12).
 	ctx, cancel := context.WithCancel(s.baseCtx)
 	defer cancel()
 
-	client := hub.NewClient(uid, name, &wsConn{conn: conn}, s.cfg.SendBuffer, s.cfg.PingInterval)
+	client := hub.NewClient(strconv.FormatInt(user.ID, 10), user.DisplayName, &wsConn{conn: conn}, s.cfg.SendBuffer, s.cfg.PingInterval)
 	s.hub.Register(client)
-	s.log.Info("web: client connected", "user", name, "id", uid)
+	s.log.Info("web: client connected", "user", user.DisplayName, "id", user.ID)
 
 	client.Run(ctx, s.hub) // blocks until the connection ends; readPump unregisters.
 
-	s.log.Info("web: client disconnected", "user", name)
-}
-
-// displayName resolves the client's display name from the ?name query parameter,
-// falling back to a guest name derived from the session ID, and caps its length so a
-// client cannot supply an unbounded name (FR-2, NFR-X2).
-func displayName(r *http.Request, uid session.UserID) string {
-	name := strings.TrimSpace(r.URL.Query().Get("name"))
-	if name == "" {
-		short := string(uid)
-		if len(short) > 6 {
-			short = short[:6]
-		}
-		name = "guest-" + short
-	}
-	if len(name) > maxDisplayName {
-		name = name[:maxDisplayName]
-	}
-	return name
+	s.log.Info("web: client disconnected", "user", user.DisplayName)
 }

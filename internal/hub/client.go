@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/ArfaMujahid/chat-room/internal/message"
-	"github.com/ArfaMujahid/chat-room/internal/session"
 )
 
 // writeWait bounds a single write/ping to the connection. It is an internal protocol
@@ -35,9 +34,10 @@ type Conn interface {
 // goroutines that own it. The hub only ever touches the send channel, never the
 // socket directly, which keeps writes single-threaded (NFR-S1).
 type Client struct {
-	// ID is the stable session identity of the user (FR-2).
-	ID session.UserID
-	// Name is the chosen display name shown on this client's messages.
+	// ID is the stable identity of the user (the authenticated account ID). It is an
+	// opaque string to the hub, which keeps the hub independent of the auth package.
+	ID string
+	// Name is the display name shown on this client's messages.
 	Name string
 	// conn is the underlying connection, read by readPump and written by writePump.
 	conn Conn
@@ -52,7 +52,7 @@ type Client struct {
 // NewClient wraps conn as a Client for user id/name, with a send buffer of the given
 // depth and the given heartbeat interval. The buffer bound is what makes slow-client
 // isolation possible.
-func NewClient(id session.UserID, name string, conn Conn, sendBuffer int, pingInterval time.Duration) *Client {
+func NewClient(id, name string, conn Conn, sendBuffer int, pingInterval time.Duration) *Client {
 	return &Client{
 		ID:           id,
 		Name:         name,

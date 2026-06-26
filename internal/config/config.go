@@ -17,6 +17,7 @@ const (
 	defaultPingInterval   = 30 * time.Second
 	defaultHistoryLimit   = 50 // messages returned to a client on join (FR-7).
 	defaultMaxRooms       = 256
+	defaultSessionTTL     = 7 * 24 * time.Hour // how long a login session lasts.
 )
 
 // Config is the fully resolved configuration for one server process. It is built
@@ -39,6 +40,11 @@ type Config struct {
 	// AllowedOrigins lists Origin header values accepted on the WS upgrade (NFR-S4).
 	// Empty means same-origin only.
 	AllowedOrigins []string
+	// SessionTTL is how long a login session remains valid.
+	SessionTTL time.Duration
+	// SecureCookies marks the session cookie Secure (HTTPS-only). Leave false for
+	// local HTTP development; set true behind TLS in production.
+	SecureCookies bool
 }
 
 // Default returns a Config populated with sensible defaults. Callers override fields
@@ -51,6 +57,7 @@ func Default() Config {
 		PingInterval:   defaultPingInterval,
 		HistoryLimit:   defaultHistoryLimit,
 		MaxRooms:       defaultMaxRooms,
+		SessionTTL:     defaultSessionTTL,
 	}
 }
 
@@ -80,6 +87,9 @@ func (c Config) Validate() error {
 	}
 	if c.MaxRooms <= 0 {
 		return fmt.Errorf("config: max rooms must be positive, got %d", c.MaxRooms)
+	}
+	if c.SessionTTL <= 0 {
+		return fmt.Errorf("config: session TTL must be positive, got %s", c.SessionTTL)
 	}
 	return nil
 }

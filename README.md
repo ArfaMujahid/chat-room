@@ -12,11 +12,11 @@ This is **Project 3 of 3** (Scraper → URL Shortener → Chat) — the capstone
 spec and [`CODING-STANDARDS.md`](CODING-STANDARDS.md) for the Go conventions every
 change is reviewed against.
 
-> **Status:** backend complete (Phase A — config, message, session, store, bus, hub,
-> persist, web, main). The server runs, broadcasts in real time, and persists to
-> Postgres; the build is `gofmt`/`vet`/`golangci-lint`/`-race`-clean with no known
-> vulns. Next up is **Phase B** — polishing the embedded frontend (presence panel,
-> reconnect, room list, connection status).
+> **Status:** complete and verified end-to-end. Real-time multi-room chat with
+> **username/password accounts** (bcrypt, server-side sessions), Postgres-backed
+> history, a polished embedded UI, and graceful shutdown. The build is
+> `gofmt`/`vet`/`golangci-lint`/`-race`-clean with no known vulns, and the full flow
+> (register → chat → logout → login) is verified against a live Postgres.
 
 ## Highlights
 
@@ -28,8 +28,11 @@ change is reviewed against.
   asynchronously on the cold path, so delivery latency is independent of the DB.
 - **Scaling seam** — broadcasting goes through a `MessageBus` interface; a Redis
   Pub/Sub backplane drops in for multi-server scaling (v2) without touching the hub.
+- **Real accounts** — username/password login with bcrypt-hashed passwords and
+  revocable, server-side sessions (token hash stored, not the token); `/ws` and the
+  rooms API require a valid session.
 - **Single binary** — the web UI is embedded via `go:embed`; Postgres is the only
-  external dependency in v1.
+  external dependency.
 
 ## Layout
 
@@ -37,12 +40,12 @@ change is reviewed against.
 cmd/chat/         composition root (config → wiring → serve → graceful shutdown)
 internal/config   Config + Validate()
 internal/message  the wire protocol (Envelope, Message)
-internal/session  session-cookie identity (UserID + display name)
+internal/auth     username/password accounts + sessions (bcrypt, Postgres)
 internal/store    MessageStore interface + Postgres impl
-internal/bus      MessageBus interface + LocalBus (v1) / RedisBus (v2 seam)
+internal/bus      MessageBus interface + LocalBus (scaling seam)
 internal/hub      the engine: hub actor, client (read/write pumps), room
 internal/persist  async persistence worker (cold path)
-internal/web      HTTP server, /ws upgrade, REST routes, embedded UI
+internal/web      HTTP server, auth endpoints, /ws upgrade, embedded UI
 migrations/       SQL schema migrations
 ```
 
@@ -60,9 +63,9 @@ The fastest path — Postgres + the chat server, one command:
 docker compose up --build
 ```
 
-Then open <http://localhost:8080> in two or three browser windows, pick a display
-name, join the same room, and type. The server applies its schema migration on
-startup, so there is no separate setup step.
+Then open <http://localhost:8080> in two or three browser windows, **register an
+account** (or log in) in each, join the same room, and type. The server applies its
+schema migrations on startup, so there is no separate setup step.
 
 ### Run against your own Postgres
 

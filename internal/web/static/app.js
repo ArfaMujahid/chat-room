@@ -1,5 +1,5 @@
-// app.js — vanilla WebSocket chat client: connect, send, render, auto-reconnect.
-// Matches the message.Envelope protocol on the server. No framework, no build step.
+// app.js — vanilla chat client with username/password auth: log in / register, then
+// connect over a WebSocket, send, render, and auto-reconnect. No framework, no build.
 
 (() => {
   "use strict";
@@ -14,14 +14,24 @@
     Error: "error",
   };
 
-  // nameKey is the localStorage key that persists the display name across refreshes,
-  // complementing the server's session cookie for identity continuity (FR-2).
-  const nameKey = "chat_display_name";
   const maxBackoff = 10000; // cap on reconnect backoff, ms (NFR-U2).
   const roomsPoll = 3000; // how often to refresh the room list, ms.
 
   const els = {
-    name: document.getElementById("name"),
+    // Auth screen.
+    auth: document.getElementById("auth"),
+    tabLogin: document.getElementById("tab-login"),
+    tabRegister: document.getElementById("tab-register"),
+    authForm: document.getElementById("auth-form"),
+    authUsername: document.getElementById("auth-username"),
+    authDisplay: document.getElementById("auth-display"),
+    authPassword: document.getElementById("auth-password"),
+    authSubmit: document.getElementById("auth-submit"),
+    authError: document.getElementById("auth-error"),
+    // Chat app.
+    app: document.getElementById("app"),
+    accountName: document.getElementById("account-name"),
+    logout: document.getElementById("logout"),
     rooms: document.getElementById("rooms"),
     joinForm: document.getElementById("join-form"),
     roomInput: document.getElementById("room-input"),
@@ -36,11 +46,13 @@
   };
 
   const state = {
+    user: null, // {username, display_name} when logged in, else null.
+    mode: "login", // "login" | "register"
     ws: null,
     room: null,
-    name: "",
-    backoff: 500, // current reconnect delay, ms; reset to this on a clean open.
-    rooms: [], // latest room list from /api/rooms, for re-render on room switch.
+    backoff: 500,
+    rooms: [],
+    roomsTimer: null,
   };
 
   // connected reports whether the socket is open and usable.
@@ -48,15 +60,125 @@
     return state.ws && state.ws.readyState === WebSocket.OPEN;
   }
 
-  // wsURL builds the ws(s):// URL for /ws, carrying the chosen display name so the
-  // server attributes messages correctly (FR-2).
-  function wsURL() {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${location.host}/ws?name=${encodeURIComponent(state.name)}`;
+  // --- authentication ---------------------------------------------------------
+
+  // checkSession asks the server who we are; it shows the chat if a session exists,
+  // otherwise the login screen.
+  async function checkSession() {
+    try {
+      const res = await fetch("/api/me");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated) {
+          state.user = data;
+          enterApp();
+          return;
+        }
+      }
+    } catch {
+      // fall through to the login screen
+    }
+    showAuth();
   }
 
-  // setStatus reflects the live connection state in the header and enables the
-  // composer only when we can actually send (connected and in a room) (NFR-U1).
+  // setMode switches the auth form between login and register.
+  function setMode(mode) {
+    state.mode = mode;
+    els.tabLogin.classList.toggle("active", mode === "login");
+    els.tabRegister.classList.toggle("active", mode === "register");
+    els.authDisplay.hidden = mode !== "register";
+    els.authSubmit.textContent = mode === "login" ? "Log in" : "Create account";
+    els.authPassword.autocomplete = mode === "login" ? "current-password" : "new-password";
+    els.authError.textContent = "";
+  }
+
+  // submitAuth logs in or registers, then enters the app on success or shows the
+  // server's error message on failure.
+  async function submitAuth(e) {
+    e.preventDefault();
+    els.authError.textContent = "";
+    const body = {
+      username: els.authUsername.value.trim(),
+      password: els.authPassword.value,
+    };
+    if (state.mode === "register") body.display_name = els.authDisplay.value.trim();
+
+    try {
+      const res = await fetch(state.mode === "login" ? "/api/login" : "/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        els.authError.textContent = (await res.text()).trim() || "could not authenticate";
+        return;
+      }
+      state.user = await res.json();
+      els.authPassword.value = "";
+      enterApp();
+    } catch {
+      els.authError.textContent = "network error";
+    }
+  }
+
+  // logout ends the session server-side and returns to the login screen.
+  async function logout() {
+    try {
+      await fetch("/api/logout", { method: "POST" });
+    } catch {
+      // ignore — we tear down locally regardless
+    }
+    teardownApp();
+    showAuth();
+  }
+
+  function showAuth() {
+    els.app.hidden = true;
+    els.auth.hidden = false;
+    els.authUsername.focus();
+  }
+
+  // enterApp reveals the chat, opens the WebSocket, and starts polling rooms.
+  function enterApp() {
+    els.auth.hidden = true;
+    els.app.hidden = false;
+    els.accountName.textContent = state.user.display_name;
+    connect();
+    refreshRooms();
+    state.roomsTimer = setInterval(refreshRooms, roomsPoll);
+  }
+
+  // teardownApp closes the socket and resets all chat state (on logout). Clearing the
+  // user first stops the close handler from reconnecting.
+  function teardownApp() {
+    state.user = null;
+    state.room = null;
+    state.rooms = [];
+    if (state.roomsTimer) {
+      clearInterval(state.roomsTimer);
+      state.roomsTimer = null;
+    }
+    if (state.ws) {
+      state.ws.close();
+      state.ws = null;
+    }
+    els.messages.replaceChildren();
+    els.presence.replaceChildren();
+    els.rooms.replaceChildren();
+    els.currentRoom.textContent = "No room";
+  }
+
+  // --- websocket --------------------------------------------------------------
+
+  // wsURL builds the ws(s):// URL for /ws. Identity comes from the session cookie, so
+  // no name is passed here.
+  function wsURL() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${location.host}/ws`;
+  }
+
+  // setStatus reflects the connection state and enables the composer only when we can
+  // actually send (connected and in a room).
   function setStatus(isConnected) {
     els.status.textContent = isConnected ? "connected" : "disconnected";
     els.status.className = isConnected ? "connected" : "disconnected";
@@ -65,22 +187,16 @@
     els.sendBtn.disabled = !canSend;
   }
 
-  // connect opens the WebSocket and wires its lifecycle, auto-reconnecting with
-  // exponential backoff when the connection drops (NFR-U2). It is a no-op until a
-  // display name has been chosen.
+  // connect opens the WebSocket and auto-reconnects with backoff while logged in
+  // (NFR-U2). It is a no-op once logged out.
   function connect() {
-    if (!state.name) {
-      renderSystem("enter a display name to start chatting");
-      return;
-    }
+    if (!state.user) return;
     const ws = new WebSocket(wsURL());
     state.ws = ws;
 
     ws.addEventListener("open", () => {
       state.backoff = 500;
       setStatus(true);
-      // Re-join the current room after a reconnect, clearing first so the replayed
-      // history does not stack on top of what is already shown.
       if (state.room) {
         els.messages.replaceChildren();
         send({ type: Type.Join, room: state.room });
@@ -100,8 +216,10 @@
     ws.addEventListener("close", () => {
       state.ws = null;
       setStatus(false);
-      setTimeout(connect, state.backoff);
-      state.backoff = Math.min(state.backoff * 2, maxBackoff);
+      if (state.user) {
+        setTimeout(connect, state.backoff);
+        state.backoff = Math.min(state.backoff * 2, maxBackoff);
+      }
     });
 
     ws.addEventListener("error", () => ws.close());
@@ -109,9 +227,7 @@
 
   // send serializes and sends an envelope if the socket is open.
   function send(envelope) {
-    if (connected()) {
-      state.ws.send(JSON.stringify(envelope));
-    }
+    if (connected()) state.ws.send(JSON.stringify(envelope));
   }
 
   // handleFrame dispatches an inbound envelope to the right renderer.
@@ -132,8 +248,8 @@
     }
   }
 
-  // renderMessage appends one chat message bubble and keeps the list scrolled to the
-  // bottom. mine aligns the bubble to the right for the local user's own messages.
+  // renderMessage appends one chat bubble; mine aligns the local user's own messages
+  // to the right.
   function renderMessage(m, mine) {
     const li = document.createElement("li");
     li.className = mine ? "mine" : "other";
@@ -174,7 +290,7 @@
   }
 
   // renderRooms draws the clickable room list with member counts, highlighting the
-  // active room (FR-10). Clicking a room joins it.
+  // active room (FR-10).
   function renderRooms(rooms) {
     state.rooms = rooms;
     els.rooms.replaceChildren();
@@ -199,57 +315,40 @@
       });
   }
 
-  // refreshRooms polls the REST endpoint for the active rooms and connection count
-  // and updates the sidebar and header (FR-10, NFR-O1). Network errors are ignored;
-  // the next tick retries.
+  // refreshRooms polls the REST endpoint for active rooms and the connection count
+  // (FR-10, NFR-O1). Errors are ignored; the next tick retries.
   async function refreshRooms() {
     try {
       const res = await fetch("/api/rooms");
       if (!res.ok) return;
       const stats = await res.json();
       renderRooms(stats.rooms || []);
-      const n = stats.connections || 0;
-      els.online.textContent = `${n} online`;
+      els.online.textContent = `${stats.connections || 0} online`;
     } catch {
-      // transient — retried on the next interval.
+      // transient
     }
   }
 
-  // joinRoom switches the active room: it leaves the previous one, clears the view,
-  // and asks the server to join the new one (FR-3/FR-4). The server replies with
-  // recent history and a presence update.
+  // joinRoom switches the active room: leave the previous one, clear the view, and
+  // join the new one (FR-3/FR-4).
   function joinRoom(room) {
     if (!room || room === state.room) return;
-    if (!state.name) {
-      renderSystem("enter a display name first");
-      els.name.focus();
-      return;
-    }
     if (state.room) send({ type: Type.Leave, room: state.room });
     state.room = room;
     els.currentRoom.textContent = room;
     els.messages.replaceChildren();
     els.presence.replaceChildren();
     send({ type: Type.Join, room });
-    renderRooms(state.rooms); // refresh active highlight immediately
+    renderRooms(state.rooms);
     setStatus(connected());
   }
 
-  // applyName persists a new display name and (re)connects under it. Because the name
-  // is carried on the WebSocket handshake, changing it requires a reconnect.
-  function applyName(raw) {
-    const name = raw.trim();
-    if (!name || name === state.name) return;
-    state.name = name;
-    localStorage.setItem(nameKey, name);
-    if (state.ws) {
-      state.ws.close(); // close handler reconnects with the new name
-    } else {
-      connect();
-    }
-  }
+  // --- event wiring -----------------------------------------------------------
 
-  els.name.addEventListener("change", () => applyName(els.name.value));
+  els.tabLogin.addEventListener("click", () => setMode("login"));
+  els.tabRegister.addEventListener("click", () => setMode("register"));
+  els.authForm.addEventListener("submit", submitAuth);
+  els.logout.addEventListener("click", logout);
 
   els.joinForm.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -262,16 +361,12 @@
     const text = els.messageInput.value.trim();
     if (!text || !state.room || !connected()) return;
     send({ type: Type.Message, room: state.room, text });
-    // The server does not echo a message back to its sender, so render it locally
-    // for instant feedback (optimistic echo).
-    renderMessage({ sender_name: state.name, content: text, created_at: new Date().toISOString() }, true);
+    // The server does not echo a message to its sender, so render it locally.
+    renderMessage({ content: text, created_at: new Date().toISOString() }, true);
     els.messageInput.value = "";
   });
 
-  // Bootstrap: restore any saved name, start the connection, and begin polling rooms.
-  state.name = localStorage.getItem(nameKey) || "";
-  els.name.value = state.name;
-  connect();
-  refreshRooms();
-  setInterval(refreshRooms, roomsPoll);
+  // Bootstrap: pick the default auth mode and find out if we are already logged in.
+  setMode("login");
+  checkSession();
 })();

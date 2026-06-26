@@ -232,7 +232,7 @@ func (h *Hub) broadcast(ctx context.Context, cmd command) {
 	}
 	m := message.Message{
 		Room:       cmd.room,
-		SenderID:   string(cmd.client.ID),
+		SenderID:   cmd.client.ID,
 		SenderName: cmd.client.Name,
 		Content:    cmd.text,
 		CreatedAt:  time.Now().UTC(),

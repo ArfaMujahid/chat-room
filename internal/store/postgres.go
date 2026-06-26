@@ -46,6 +46,13 @@ func NewPostgres(ctx context.Context, dsn string) (*Postgres, error) {
 	return p, nil
 }
 
+// Pool exposes the underlying pgx pool so other domain stores (e.g. auth) can share
+// one connection pool and the schema migrations applied here, rather than opening
+// their own. The store still owns the pool's lifecycle via Close.
+func (p *Postgres) Pool() *pgxpool.Pool {
+	return p.pool
+}
+
 // Close releases the connection pool. It is safe to call on a partially built store
 // and safe to call more than once.
 func (p *Postgres) Close() error {
