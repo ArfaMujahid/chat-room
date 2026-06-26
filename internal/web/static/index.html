@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Go Chat</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <h1>Go Chat</h1>
+      <div id="identity">
+        <label for="name">Display name</label>
+        <input id="name" type="text" placeholder="Pick a name" autocomplete="off" />
+      </div>
+      <div id="rooms-panel">
+        <h2>Rooms</h2>
+        <ul id="rooms"></ul>
+        <form id="join-form">
+          <input id="room-input" type="text" placeholder="Join or create a room" autocomplete="off" />
+          <button type="submit">Join</button>
+        </form>
+      </div>
+      <div id="presence-panel">
+        <h2>Present</h2>
+        <ul id="presence"></ul>
+      </div>
+    </aside>
+
+    <main id="chat">
+      <header id="chat-header">
+        <span id="current-room">No room</span>
+        <span id="status" class="disconnected">disconnected</span>
+      </header>
+      <ul id="messages"></ul>
+      <form id="message-form">
+        <input id="message-input" type="text" placeholder="Type a message…" autocomplete="off" disabled />
+        <button type="submit" disabled>Send</button>
+      </form>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

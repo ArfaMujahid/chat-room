@@ -1,0 +1,23 @@
+# Binaries
+/chat
+/bin/
+*.exe
+*.out
+
+# Test & coverage artifacts
+*.test
+coverage.out
+coverage.html
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Local env / secrets (never commit — CODING-STANDARDS §10)
+.env
+*.local
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store

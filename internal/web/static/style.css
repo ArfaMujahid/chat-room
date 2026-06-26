@@ -1,0 +1,103 @@
+/* style.css — minimal, presentable chat UI (NFR-U1). Vanilla CSS, no build step. */
+
+:root {
+  --bg: #0f1419;
+  --panel: #1a212b;
+  --border: #2a3340;
+  --text: #e6edf3;
+  --muted: #8b97a5;
+  --accent: #3b82f6;
+  --ok: #22c55e;
+  --bad: #ef4444;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#app {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100vh;
+}
+
+#sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  overflow-y: auto;
+}
+
+#sidebar h1 { font-size: 1.25rem; margin: 0; }
+#sidebar h2 { font-size: 0.8rem; text-transform: uppercase; color: var(--muted); margin: 0 0 0.5rem; }
+
+input, button {
+  font: inherit;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+button {
+  background: var(--accent);
+  border-color: var(--accent);
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+#identity { display: flex; flex-direction: column; gap: 0.35rem; }
+#identity label { font-size: 0.75rem; color: var(--muted); }
+
+#rooms, #presence { list-style: none; margin: 0 0 0.5rem; padding: 0; }
+#rooms li, #presence li { padding: 0.35rem 0.5rem; border-radius: 6px; cursor: pointer; }
+#rooms li:hover { background: var(--bg); }
+#rooms li.active { background: var(--accent); }
+
+#join-form { display: flex; gap: 0.4rem; }
+#join-form input { flex: 1; }
+
+#chat { display: flex; flex-direction: column; height: 100vh; }
+
+#chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+#current-room { font-weight: 600; }
+#status { font-size: 0.75rem; padding: 0.2rem 0.55rem; border-radius: 999px; }
+#status.connected { color: var(--ok); border: 1px solid var(--ok); }
+#status.disconnected { color: var(--bad); border: 1px solid var(--bad); }
+
+#messages {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 1rem 1.25rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+#messages li { line-height: 1.4; }
+#messages .meta { font-size: 0.72rem; color: var(--muted); margin-right: 0.5rem; }
+#messages .system { color: var(--muted); font-style: italic; }
+
+#message-form {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.85rem 1.25rem;
+  border-top: 1px solid var(--border);
+}
+#message-input { flex: 1; }
