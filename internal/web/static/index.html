@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Go Chat</title>
+  <!-- Inline SVG favicon (a chat bubble) so the page needs no extra request and logs no 404. -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%233b82f6'/><circle cx='5.5' cy='9' r='1' fill='white'/><circle cx='8' cy='9' r='1' fill='white'/><circle cx='10.5' cy='9' r='1' fill='white'/></svg>" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -31,7 +33,10 @@
     <main id="chat">
       <header id="chat-header">
         <span id="current-room">No room</span>
-        <span id="status" class="disconnected">disconnected</span>
+        <div class="header-right">
+          <span id="online" title="connected clients">0 online</span>
+          <span id="status" class="disconnected">disconnected</span>
+        </div>
       </header>
       <ul id="messages"></ul>
       <form id="message-form">

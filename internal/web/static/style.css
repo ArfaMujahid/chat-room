@@ -59,9 +59,26 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 #identity label { font-size: 0.75rem; color: var(--muted); }
 
 #rooms, #presence { list-style: none; margin: 0 0 0.5rem; padding: 0; }
-#rooms li, #presence li { padding: 0.35rem 0.5rem; border-radius: 6px; cursor: pointer; }
+#presence li { padding: 0.35rem 0.5rem; }
+#rooms li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
 #rooms li:hover { background: var(--bg); }
 #rooms li.active { background: var(--accent); }
+.room-count {
+  font-size: 0.7rem;
+  color: var(--muted);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+}
+#rooms li.active .room-count { color: var(--text); background: rgba(255, 255, 255, 0.2); }
 
 #join-form { display: flex; gap: 0.4rem; }
 #join-form input { flex: 1; }
@@ -76,6 +93,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-bottom: 1px solid var(--border);
 }
 #current-room { font-weight: 600; }
+.header-right { display: flex; align-items: center; gap: 0.6rem; }
+#online { font-size: 0.75rem; color: var(--muted); }
 #status { font-size: 0.75rem; padding: 0.2rem 0.55rem; border-radius: 999px; }
 #status.connected { color: var(--ok); border: 1px solid var(--ok); }
 #status.disconnected { color: var(--bad); border: 1px solid var(--bad); }
@@ -90,9 +109,26 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   flex-direction: column;
   gap: 0.5rem;
 }
-#messages li { line-height: 1.4; }
-#messages .meta { font-size: 0.72rem; color: var(--muted); margin-right: 0.5rem; }
-#messages .system { color: var(--muted); font-style: italic; }
+#messages li {
+  line-height: 1.4;
+  max-width: 75%;
+  padding: 0.4rem 0.65rem;
+  border-radius: 12px;
+}
+#messages li.other { align-self: flex-start; background: var(--panel); }
+#messages li.mine { align-self: flex-end; background: var(--accent); color: #fff; }
+#messages li.system {
+  align-self: center;
+  max-width: 100%;
+  padding: 0.1rem;
+  background: none;
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.8rem;
+}
+#messages .meta { display: block; font-size: 0.7rem; color: var(--muted); margin-bottom: 0.1rem; }
+#messages li.mine .meta { color: rgba(255, 255, 255, 0.85); }
+#messages .body { white-space: pre-wrap; word-break: break-word; }
 
 #message-form {
   display: flex;
