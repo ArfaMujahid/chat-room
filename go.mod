@@ -5,7 +5,10 @@ go 1.26
 // Dependencies are added as each package is implemented — see chat-architecture.md
 // §7 for the full justified list (websocket, uuid, errgroup, go-redis still pending).
 
-require github.com/jackc/pgx/v5 v5.10.0
+require (
+	github.com/coder/websocket v1.8.15
+	github.com/jackc/pgx/v5 v5.10.0
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect

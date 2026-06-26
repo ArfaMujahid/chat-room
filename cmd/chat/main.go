@@ -67,7 +67,7 @@ func run() error {
 	h := hub.New(st, persister.Inbox(), cfg.HistoryLimit, logger)
 	sessions := session.New()
 
-	srv, err := web.New(cfg, h, sessions, logger)
+	srv, err := web.New(ctx, cfg, h, sessions, logger)
 	if err != nil {
 		return err
 	}

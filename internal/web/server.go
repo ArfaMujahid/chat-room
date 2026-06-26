@@ -10,15 +10,22 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/ArfaMujahid/chat-room/internal/config"
 	"github.com/ArfaMujahid/chat-room/internal/hub"
 	"github.com/ArfaMujahid/chat-room/internal/session"
 )
+
+// maxDisplayName caps a chosen display name so a client cannot send an unbounded one.
+const maxDisplayName = 32
 
 // staticFS embeds the chat UI (HTML/CSS/JS) into the binary (go:embed, NFR-D1).
 //
@@ -33,19 +40,23 @@ type Server struct {
 	sessions *session.Manager
 	log      *slog.Logger
 	http     *http.Server
+	// baseCtx is the application context; WebSocket connections derive from it, so
+	// cancelling it on shutdown tears every live connection down (FR-12).
+	baseCtx context.Context
 }
 
 // New builds a Server with all routes registered and timeouts set. It does not start
-// listening; call Serve for that. The hub must already be running.
-func New(cfg config.Config, h *hub.Hub, sessions *session.Manager, log *slog.Logger) (*Server, error) {
+// listening; call Serve for that. The hub must already be running, and baseCtx must
+// be the context that is cancelled on shutdown.
+func New(baseCtx context.Context, cfg config.Config, h *hub.Hub, sessions *session.Manager, log *slog.Logger) (*Server, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Server{cfg: cfg, hub: h, sessions: sessions, log: log}
+	s := &Server{cfg: cfg, hub: h, sessions: sessions, log: log, baseCtx: baseCtx}
 
 	ui, err := fs.Sub(staticFS, "static")
 	if err != nil {
-		return nil, errors.New("web: locating embedded static assets") // unreachable unless embed misconfigured
+		return nil, fmt.Errorf("locating embedded static assets: %w", err)
 	}
 
 	mux := http.NewServeMux()
@@ -54,12 +65,12 @@ func New(cfg config.Config, h *hub.Hub, sessions *session.Manager, log *slog.Log
 	mux.HandleFunc("GET /ws", s.handleWS)
 
 	// Explicit server with timeouts — never the default ListenAndServe (§6, NFR-S3).
+	// WriteTimeout is intentionally left zero: a WebSocket connection is long-lived,
+	// and per-write deadlines are enforced inside the hub's write pump instead.
 	s.http = &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           s.sessions.Middleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 	return s, nil
@@ -81,25 +92,67 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
 }
 
-// handleRooms returns the active rooms as JSON for the UI's room list (FR-10).
+// handleRooms returns a snapshot of active rooms and the connection count as JSON for
+// the UI's room list and live metrics (FR-10, NFR-O1).
 func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
-	// TODO(arfa): ask the hub for its active room names + member counts.
-	rooms := []string{}
+	stats := s.hub.Snapshot(r.Context())
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(rooms); err != nil {
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		s.log.Error("web: encoding rooms response", "err", err)
 	}
 }
 
 // handleWS validates the Origin (NFR-S4), resolves the session, upgrades the
-// connection to a WebSocket, wraps it as a hub.Client, and starts its pumps (FR-1).
+// connection to a WebSocket with a bounded read size (NFR-S2), wraps it as a
+// hub.Conn, and runs it as a Client until the connection ends (FR-1).
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
-	if _, ok := session.FromContext(r.Context()); !ok {
+	uid, ok := session.FromContext(r.Context())
+	if !ok {
 		http.Error(w, "no session", http.StatusUnauthorized)
 		return
 	}
-	// TODO(arfa): check Origin against cfg.AllowedOrigins (NFR-S4); upgrade with the
-	// chosen WebSocket lib; wrap the conn as a hub.Conn; build a hub.Client and run
-	// it. Until then, signal the endpoint is not yet implemented.
-	http.Error(w, "websocket endpoint not implemented", http.StatusNotImplemented)
+
+	opts := &websocket.AcceptOptions{}
+	if len(s.cfg.AllowedOrigins) > 0 {
+		opts.OriginPatterns = s.cfg.AllowedOrigins
+	}
+	conn, err := websocket.Accept(w, r, opts)
+	if err != nil {
+		// Accept has already written an error response to the client.
+		s.log.Warn("web: websocket accept failed", "err", err)
+		return
+	}
+	conn.SetReadLimit(s.cfg.MaxMessageSize) // reject oversized frames (NFR-S2)
+
+	name := displayName(r, uid)
+
+	// Derive from baseCtx so server shutdown cancels the connection (FR-12).
+	ctx, cancel := context.WithCancel(s.baseCtx)
+	defer cancel()
+
+	client := hub.NewClient(uid, name, &wsConn{conn: conn}, s.cfg.SendBuffer, s.cfg.PingInterval)
+	s.hub.Register(client)
+	s.log.Info("web: client connected", "user", name, "id", uid)
+
+	client.Run(ctx, s.hub) // blocks until the connection ends; readPump unregisters.
+
+	s.log.Info("web: client disconnected", "user", name)
+}
+
+// displayName resolves the client's display name from the ?name query parameter,
+// falling back to a guest name derived from the session ID, and caps its length so a
+// client cannot supply an unbounded name (FR-2, NFR-X2).
+func displayName(r *http.Request, uid session.UserID) string {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		short := string(uid)
+		if len(short) > 6 {
+			short = short[:6]
+		}
+		name = "guest-" + short
+	}
+	if len(name) > maxDisplayName {
+		name = name[:maxDisplayName]
+	}
+	return name
 }
