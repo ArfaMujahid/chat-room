@@ -12,9 +12,11 @@ This is **Project 3 of 3** (Scraper → URL Shortener → Chat) — the capstone
 spec and [`CODING-STANDARDS.md`](CODING-STANDARDS.md) for the Go conventions every
 change is reviewed against.
 
-> **Status:** scaffold. The directory tree, package boundaries, core types, and
-> consumer-side interfaces are in place and build clean. Implementations are stubbed
-> with `TODO` markers and filled in following the build order below.
+> **Status:** backend complete (Phase A — config, message, session, store, bus, hub,
+> persist, web, main). The server runs, broadcasts in real time, and persists to
+> Postgres; the build is `gofmt`/`vet`/`golangci-lint`/`-race`-clean with no known
+> vulns. Next up is **Phase B** — polishing the embedded frontend (presence panel,
+> reconnect, room list, connection status).
 
 ## Highlights
 
@@ -50,16 +52,40 @@ migrations/       SQL schema migrations
 (room, client, hub actor + slow-client drop + race test) → 6. `persist` → 7. `web`
 → 8. `main` (✅ two-browser live demo) → 9. UI polish + Dockerfile + compose.
 
-## Quick start
+## Run the demo
+
+The fastest path — Postgres + the chat server, one command:
 
 ```sh
-# Build & vet (works today on the scaffold)
+docker compose up --build
+```
+
+Then open <http://localhost:8080> in two or three browser windows, pick a display
+name, join the same room, and type. The server applies its schema migration on
+startup, so there is no separate setup step.
+
+### Run against your own Postgres
+
+```sh
+go run ./cmd/chat \
+  --addr :8080 \
+  --db-url "postgres://user:pass@localhost:5432/chat?sslmode=disable"
+```
+
+Run `go run ./cmd/chat --help` for all flags (message-size cap, send-buffer depth,
+ping interval, history limit, room cap).
+
+## Develop
+
+```sh
 go build ./...
 go vet ./...
 gofmt -l .
-
-# Run (once implemented) — Postgres connection comes from config/flags/env
-go run ./cmd/chat --addr :8080 --db-url "postgres://localhost:5432/chat?sslmode=disable"
+golangci-lint run ./...
+go test -race ./...
+# Store integration test runs only when a database is provided:
+CHAT_TEST_DB_URL="postgres://user:pass@localhost:5432/chat_test?sslmode=disable" \
+  go test -race ./internal/store/...
 ```
 
 ## License

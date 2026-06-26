@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ArfaMujahid/chat-room/internal/config"
 	"github.com/ArfaMujahid/chat-room/internal/hub"
 	"github.com/ArfaMujahid/chat-room/internal/persist"
@@ -57,6 +59,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Closed last (after g.Wait below), so the persister can still drain to it during
+	// shutdown (NFR-R4).
 	defer func() {
 		if cerr := st.Close(); cerr != nil {
 			logger.Error("chat: closing store", "err", cerr)
@@ -67,28 +71,32 @@ func run() error {
 	h := hub.New(st, persister.Inbox(), cfg.HistoryLimit, logger)
 	sessions := session.New()
 
-	srv, err := web.New(ctx, cfg, h, sessions, logger)
+	// errgroup ties the components together: if any returns (signal, serve error),
+	// gctx is cancelled and the rest wind down (CODING-STANDARDS §4).
+	g, gctx := errgroup.WithContext(ctx)
+
+	srv, err := web.New(gctx, cfg, h, sessions, logger)
 	if err != nil {
 		return err
 	}
 
-	// Start the long-running goroutines. Each stops when ctx is cancelled (NFR-R1).
-	go h.Run(ctx)
-	go persister.Run(ctx)
+	// Long-running components; each returns when gctx is cancelled (NFR-R1). The
+	// persister drains its queue on cancel before returning (NFR-R4).
+	g.Go(func() error { h.Run(gctx); return nil })
+	g.Go(func() error { persister.Run(gctx); return nil })
+	g.Go(func() error { return srv.Serve() })
 
-	// Serve in the background so we can wait on ctx for shutdown.
-	serveErr := make(chan error, 1)
-	go func() { serveErr <- srv.Serve() }()
-
-	select {
-	case err := <-serveErr:
-		return err
-	case <-ctx.Done():
+	// Graceful shutdown: stop accepting connections and drain in-flight HTTP work
+	// within the grace period once shutdown begins (FR-12).
+	g.Go(func() error {
+		<-gctx.Done()
 		logger.Info("chat: shutdown signal received, draining")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
-	}
+	})
+
+	return g.Wait()
 }
 
 // parseFlags builds a Config from defaults overridden by command-line flags. Every
