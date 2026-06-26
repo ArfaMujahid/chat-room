@@ -2,6 +2,15 @@ module github.com/ArfaMujahid/chat-room
 
 go 1.26
 
-// External dependencies (websocket, pgx, uuid, errgroup, go-redis) are added
-// as each package is implemented — see chat-architecture.md §7. The scaffold
-// is intentionally standard-library-only so it builds before any code lands.
+// Dependencies are added as each package is implemented — see chat-architecture.md
+// §7 for the full justified list (websocket, uuid, errgroup, go-redis still pending).
+
+require github.com/jackc/pgx/v5 v5.10.0
+
+require (
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	golang.org/x/sync v0.17.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
+)
