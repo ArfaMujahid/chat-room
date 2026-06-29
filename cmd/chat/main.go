@@ -13,6 +13,7 @@ import (
 	_ "net/http/pprof" // registers pprof handlers on http.DefaultServeMux
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,22 +59,21 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	st, err := store.NewPostgres(ctx, cfg.DBURL)
+	msgStore, authStore, closeStore, err := openStores(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
 	// Closed last (after g.Wait below), so the persister can still drain to it during
 	// shutdown (NFR-R4).
 	defer func() {
-		if cerr := st.Close(); cerr != nil {
+		if cerr := closeStore(); cerr != nil {
 			logger.Error("chat: closing store", "err", cerr)
 		}
 	}()
 
-	persister := persist.New(st, persistQueueDepth, logger)
-	h := hub.New(st, persister.Inbox(), cfg.HistoryLimit, logger)
-	// Auth shares the store's connection pool and the schema it migrated.
-	authSvc := auth.NewService(auth.NewPostgres(st.Pool()), cfg.SessionTTL)
+	persister := persist.New(msgStore, persistQueueDepth, logger)
+	h := hub.New(msgStore, persister.Inbox(), cfg.HistoryLimit, logger)
+	authSvc := auth.NewService(authStore, cfg.SessionTTL)
 
 	// errgroup ties the components together: if any returns (signal, serve error),
 	// gctx is cancelled and the rest wind down (CODING-STANDARDS §4).
@@ -108,6 +108,31 @@ func run() error {
 	return g.Wait()
 }
 
+// openStores selects the database from the configured DSN and returns the message
+// store, auth store, and a close function. A postgres:// URL uses Postgres (one
+// shared pool); anything else uses the embedded SQLite store (one shared handle), so
+// the binary runs with no external services.
+func openStores(ctx context.Context, cfg config.Config, logger *slog.Logger) (store.MessageStore, auth.Store, func() error, error) {
+	if strings.HasPrefix(cfg.DBURL, "postgres://") || strings.HasPrefix(cfg.DBURL, "postgresql://") {
+		pg, err := store.NewPostgres(ctx, cfg.DBURL)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		logger.Info("chat: using postgres store")
+		return pg, auth.NewPostgres(pg.Pool()), pg.Close, nil
+	}
+	path := strings.TrimPrefix(cfg.DBURL, "sqlite:")
+	if path == "" {
+		path = "chat.db"
+	}
+	sq, err := store.NewSQLite(ctx, path)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	logger.Info("chat: using sqlite store", "path", path)
+	return sq, auth.NewSQLite(sq.DB()), sq.Close, nil
+}
+
 // startDebugServer runs a pprof HTTP server on addr until ctx is cancelled. The pprof
 // handlers are registered on http.DefaultServeMux by the net/http/pprof import; the
 // chat server uses its own mux, so profiling never leaks onto the public port. Bind
@@ -134,7 +159,7 @@ func startDebugServer(ctx context.Context, g *errgroup.Group, addr string, logge
 func parseFlags() config.Config {
 	cfg := config.Default()
 	flag.StringVar(&cfg.Addr, "addr", cfg.Addr, "host:port to listen on")
-	flag.StringVar(&cfg.DBURL, "db-url", cfg.DBURL, "Postgres connection string (required)")
+	flag.StringVar(&cfg.DBURL, "db-url", cfg.DBURL, "postgres:// URL for Postgres, or a SQLite file path (default: chat.db)")
 	flag.Int64Var(&cfg.MaxMessageSize, "max-message-size", cfg.MaxMessageSize, "max inbound frame size in bytes")
 	flag.IntVar(&cfg.SendBuffer, "send-buffer", cfg.SendBuffer, "per-client send channel depth")
 	flag.DurationVar(&cfg.PingInterval, "ping-interval", cfg.PingInterval, "interval between heartbeat pings")

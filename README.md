@@ -31,8 +31,9 @@ change is reviewed against.
 - **Real accounts** — username/password login with bcrypt-hashed passwords and
   revocable, server-side sessions (token hash stored, not the token); `/ws` and the
   rooms API require a valid session.
-- **Single binary** — the web UI is embedded via `go:embed`; Postgres is the only
-  external dependency.
+- **Single binary, zero setup** — the web UI is embedded via `go:embed` and storage
+  defaults to an embedded SQLite file, so the binary runs with no external services.
+  Point `--db-url` at Postgres for a multi-instance/production setup.
 
 ## Layout
 
@@ -55,28 +56,38 @@ migrations/       SQL schema migrations
 (room, client, hub actor + slow-client drop + race test) → 6. `persist` → 7. `web`
 → 8. `main` (✅ two-browser live demo) → 9. UI polish + Dockerfile + compose.
 
-## Run the demo
+## Download & run (no setup)
 
-The fastest path — Postgres + the chat server, one command:
+Grab the binary for your OS/arch from the [latest release](https://github.com/ArfaMujahid/chat-room/releases/latest), then:
 
 ```sh
-docker compose up --build
+chmod +x chat_*                 # make it executable (macOS/Linux)
+./chat_darwin_arm64             # listens on :8080, stores data in ./chat.db
 ```
 
-Then open <http://localhost:8080> in two or three browser windows, **register an
-account** (or log in) in each, join the same room, and type. The server applies its
-schema migrations on startup, so there is no separate setup step.
+Open <http://localhost:8080>, **register an account**, join a room, and chat. It
+needs **nothing else** — messages and accounts are kept in an embedded SQLite file
+(`chat.db`) that survives restarts.
 
-### Run against your own Postgres
+> **macOS:** a downloaded, unsigned binary is quarantined by Gatekeeper. Allow it once
+> with `xattr -d com.apple.quarantine ./chat_darwin_arm64` (or right-click → Open).
+
+To see two users chatting live, open a second **browser profile or an incognito
+window** (identity is a per-browser session cookie, so two tabs in the same browser
+are the same account).
+
+## Run from source
 
 ```sh
-go run ./cmd/chat \
-  --addr :8080 \
+go run ./cmd/chat                       # embedded SQLite (./chat.db), zero setup
+go run ./cmd/chat --addr :8080 \        # or point at your own Postgres
   --db-url "postgres://user:pass@localhost:5432/chat?sslmode=disable"
 ```
 
-Run `go run ./cmd/chat --help` for all flags (message-size cap, send-buffer depth,
-ping interval, history limit, room cap, session TTL).
+Or with Docker (Postgres + the server): `docker compose up --build`.
+
+Run `go run ./cmd/chat --help` for all flags (database, message-size cap, send-buffer
+depth, ping interval, history limit, room cap, session TTL, pprof debug address).
 
 ## Observability
 

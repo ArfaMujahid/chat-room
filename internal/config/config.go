@@ -25,7 +25,9 @@ const (
 type Config struct {
 	// Addr is the host:port the HTTP/WebSocket server listens on.
 	Addr string
-	// DBURL is the Postgres connection string for message persistence.
+	// DBURL selects the database. A postgres:// URL uses Postgres; anything else — or
+	// empty — is treated as a SQLite file path (defaulting to chat.db), so the binary
+	// runs with no external services.
 	DBURL string
 	// MaxMessageSize bounds an inbound WebSocket frame, in bytes (NFR-S2).
 	MaxMessageSize int64
@@ -64,17 +66,12 @@ func Default() Config {
 	}
 }
 
-// ErrMissingDBURL indicates the required Postgres connection string was not provided.
-var ErrMissingDBURL = errors.New("config: database URL is required")
-
 // Validate reports the first reason the configuration is unusable, or nil if the
-// config is safe to run with. It is called once at startup (fail-fast, FR-14).
+// config is safe to run with. It is called once at startup (fail-fast, FR-14). DBURL
+// is intentionally not required: empty means the embedded SQLite store.
 func (c Config) Validate() error {
 	if c.Addr == "" {
 		return errors.New("config: listen address is required")
-	}
-	if c.DBURL == "" {
-		return ErrMissingDBURL
 	}
 	if c.MaxMessageSize <= 0 {
 		return fmt.Errorf("config: max message size must be positive, got %d", c.MaxMessageSize)
