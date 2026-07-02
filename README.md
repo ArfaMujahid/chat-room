@@ -18,6 +18,14 @@ change is reviewed against.
 > `gofmt`/`vet`/`golangci-lint`/`-race`-clean with no known vulns, and the full flow
 > (register → chat → logout → login) is verified against a live Postgres.
 
+## Screenshots
+
+| Login / Register | Dashboard | Chat Room |
+|:---:|:---:|:---:|
+| ![Login page](docs/screenshots/login-page.png) | ![Dashboard](docs/screenshots/chat-dashboard.png) | ![Chat room](docs/screenshots/chat-room-messages.png) |
+
+---
+
 ## Highlights
 
 - **Hub-and-spoke concurrency** — a single actor goroutine owns the rooms/clients map;
